@@ -1,0 +1,1 @@
+mapanything @ git+https://github.com/facebookresearch/map-anything.git@c845b8f4f6cde0c20aecd87573656c3f69f5b2b0
