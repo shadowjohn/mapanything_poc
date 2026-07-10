@@ -49,6 +49,8 @@ mesh mask。所有有效視角都各自輸出一層 mesh，沒有 fusion。
 
 ```text
 --quality-filter {balanced,off}   預設 balanced
+--blur-threshold FLOAT            預設 1.5，允許 0～100
+--duplicate-hamming-threshold INT 預設 4，允許 0～16
 --confidence-percentile FLOAT    預設 10，允許 0～50
 --max-output-views INT            預設 10，允許 6～10
 ```
@@ -101,17 +103,18 @@ sharpness = variance(lap) / (gradient_energy + 1e-12)
 `up/down/left/right` 都取自與 `center` 相鄰且同尺寸的內部切片；sharpness 必須是 finite，否則以
 `invalid_sharpness` 失敗。
 
-`sharpness < 1.5` 判定為模糊；等於門檻時保留。固定 8 張既有辦公室照片的分數為 1.892～2.046，確認不會
-被預設門檻誤刪。門檻先固定於 v1，所有分數與門檻都必須寫入 report；真實模糊樣本的 threshold 校正
-明確不納入本版。
+預設以 `sharpness < 1.5` 判定為模糊；等於設定門檻時保留。完成版以固定 8 張既有辦公室照片實跑的
+分數為 7.566～8.183，確認不會被預設值誤刪；先前設計階段的 1.892～2.046 估值不再作為驗收依據。
+使用者可透過 CLI 校正門檻，所有分數與實際門檻都必須寫入 report；自動 threshold 校正明確不納入本版。
 
 近重複判定使用 64-bit dHash：
 
 1. 將同一灰階縮圖縮成 9×8。
-2. 比較每列相鄰像素並以 row-major 打包 64 bits。
+2. 以 `right > left` 比較每列相鄰像素並以 row-major 打包 64 bits。
 3. 依自然排序逐張分組；每組保留第一張照片的 dHash 作為固定 anchor，後續不因 winner 改變 anchor。
-4. 新照片和所有 group anchor 比較；最小 Hamming distance `<= 4` 時加入該組，距離同分時選 anchor 較早
-   的組，沒有符合者則建立新組。此規則刻意不做傳遞式合併，避免一段緩慢移動的照片被 chain 成一組。
+4. 新照片和所有 group anchor 比較；最小 Hamming distance 小於等於設定門檻時加入該組（預設 4），距離
+   同分時選 anchor 較早的組，沒有符合者則建立新組。此規則刻意不做傳遞式合併，避免一段緩慢移動的
+   照片被 chain 成一組。
 5. 每組只保留 sharpness 較高者；同分保留自然排序較早者。所有 loser 的 `near_duplicate_of` 指向該組
    最終 winner，最後再把 winners 按自然順序排列。
 
@@ -266,6 +269,9 @@ mesh/material/texture/image count == export_view_count
 quality_filter_seconds + image_load_seconds + inference_seconds + export_seconds
 ```
 
+`export_seconds` 從 `model.infer` 完成後立刻開始，包含 depth-to-world、combined mask、view summary、代表視角
+選擇、scene build、GLB 寫入與 validation；不得把這些 per-request 後處理留在所有 timing 欄位之外。
+
 所有數值必須 finite，JSON 不允許 NaN 或 infinity。
 
 Report 必須在每個已完成階段後原子更新：quality filter 完成後先寫 counts/decisions，inference 後再寫 views，
@@ -336,6 +342,7 @@ Synthetic tests 必須覆蓋：
 
 - EXIF orientation 後的 deterministic sharpness。
 - 清楚圖保留、模糊圖拒絕、`sharpness == 1.5` 保留。
+- Blur threshold `0～100`、dHash threshold `0～16` 的 CLI 邊界與 report 值一致。
 - dHash distance `<=4` 歸為近重複，保留較清楚者；同分保留較早者。
 - 一張圖同時接近多個 group anchor 時選距離最小者；距離同分選較早 anchor，且 fixed-anchor 分組不做
   傳遞式 chain merge。

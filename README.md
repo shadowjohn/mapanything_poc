@@ -95,7 +95,7 @@ New-Item -ItemType Directory -Force .\input | Out-Null
 
 ## 輸出內容與限制
 
-`scene.glb` 會為每個輸入視角內嵌一張模型處理解析度的 JPEG 與一個 PBR material，不需要外部貼圖檔，
+`scene.glb` 會為每個匯出視角內嵌一張模型處理解析度的 JPEG 與一個 PBR material，不需要外部貼圖檔，
 也不輸出 `COLOR_0` vertex color。
 
 每個視角的 mesh 仍然分開存在，因此重疊、接縫、破洞與局部碎片屬於目前機制的預期限制。工具沒有做
@@ -112,16 +112,29 @@ TSDF、Poisson、mesh fusion、接縫消除或重新拓撲。
 - Peak reserved VRAM：8892 MiB。
 - 單一自包含 GLB：137,458,984 bytes。
 
-20 秒目標只計算 warm inference 與 textured GLB export，不包含模型首次載入、上傳、排隊、下載與 viewer
-解析時間。
+30 秒 hard gate 計算 quality filter、每次 image load、warm inference 與 postprocess/export，不包含模型首次
+載入、上傳、排隊、下載與 viewer 解析時間。
 
-## 尚未實作的品質改善
+## 快速品質模式
 
-後續可依成本由低到高評估：
+預設 `balanced` 會先排除明顯模糊與近重複照片，套用 MapAnything p10 learned confidence mask，再依拍攝順序最多輸出 10 個代表視角。低信心區會直接形成洞；工具仍不會補洞或融合表面。
 
-- 以 confidence 移除低信心 mesh；預期洞會增加，但重影與拉絲會減少。
-- 在推論前排除模糊、近似重複或含移動人物的照片。
-- 進行跨視角深度／遮擋比較，同一位置只保留最佳視角；這已接近表面融合，不是單純 exporter 修改。
+```powershell
+.\.venv\Scripts\python.exe .\run.py `
+  --input-dir .\input `
+  --output-dir .\output `
+  --quality-filter balanced `
+  --blur-threshold 1.5 `
+  --duplicate-hamming-threshold 4 `
+  --confidence-percentile 10 `
+  --max-output-views 10
+```
+
+`--quality-filter off` 只作 A/B、除錯與低紋理場景退路：仍驗證每張圖片可解碼，但不做模糊／重複篩選、不套 confidence mask，也不限制輸出 views。
+
+`report.json` schema v2 會列出每張照片的 sharpness、拒絕原因、代表視角決策，以及拆開的 quality/image-load/inference/export 時間。Warm preview 定義為 quality filter + 每次 image load + inference + postprocess/export；目標機器的 18-view hard gate 是 30 秒。
+
+本模式不含人物偵測。移動人物仍應在拍攝時清場或在輸入前排除；confidence mask 只能挖掉模型不確定區域，不能保證自動消除所有手腳碎片。
 
 ## 版本與授權
 
